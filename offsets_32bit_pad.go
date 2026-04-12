@@ -1,4 +1,4 @@
-// +build arm
+//go:build arm
 
 package tcmu
 
@@ -18,6 +18,7 @@ const (
 	offReqCdbOff     = entReqRespOff + 16
 
 	iovSize        = 8
+	iovPtrWidth    = 4
 	offReqIov0Base = entReqRespOff + 40
 	offReqIov0Len  = entReqRespOff + 44
 

@@ -1,4 +1,4 @@
-// +build 386
+//go:build 386
 
 package tcmu
 
@@ -18,6 +18,7 @@ const (
 	offReqCdbOff     = entReqRespOff + 12
 
 	iovSize        = 8
+	iovPtrWidth    = 4
 	offReqIov0Base = entReqRespOff + 36
 	offReqIov0Len  = entReqRespOff + 40
 

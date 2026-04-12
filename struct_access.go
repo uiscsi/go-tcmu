@@ -3,34 +3,32 @@ package tcmu
 import (
 	"encoding/binary"
 	"fmt"
-	"syscall"
-	"unsafe"
 )
 
 var byteOrder binary.ByteOrder = binary.LittleEndian
 
 func (d *Device) mbVersion() uint16 {
-	return *(*uint16)(unsafe.Pointer(&d.mmap[0]))
+	return binary.LittleEndian.Uint16(d.mmap[0:])
 }
 
 func (d *Device) mbFlags() uint16 {
-	return *(*uint16)(unsafe.Pointer(&d.mmap[2]))
+	return binary.LittleEndian.Uint16(d.mmap[2:])
 }
 
 func (d *Device) mbCmdrOffset() uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[4]))
+	return binary.LittleEndian.Uint32(d.mmap[4:])
 }
 
 func (d *Device) mbCmdrSize() uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[8]))
+	return binary.LittleEndian.Uint32(d.mmap[8:])
 }
 
 func (d *Device) mbCmdHead() uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[12]))
+	return binary.LittleEndian.Uint32(d.mmap[12:])
 }
 
 func (d *Device) mbCmdTail() uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[64]))
+	return binary.LittleEndian.Uint32(d.mmap[64:])
 }
 
 func (d *Device) mbSetTail(u uint32) {
@@ -63,28 +61,29 @@ struct tcmu_cmd_entry_hdr {
 } __packed;
 */
 func (d *Device) entHdrOp(off int) tcmuOpcode {
-	i := int(*(*uint32)(unsafe.Pointer(&d.mmap[off+offLenOp])))
-	i = i & 0x7
-	return tcmuOpcode(i)
+	v := binary.LittleEndian.Uint32(d.mmap[off+offLenOp:])
+	return tcmuOpcode(v & 0x7)
 }
 
 func (d *Device) entHdrGetLen(off int) int {
-	i := *(*uint32)(unsafe.Pointer(&d.mmap[off+offLenOp]))
-	i = i &^ 0x7
-	return int(i)
+	v := binary.LittleEndian.Uint32(d.mmap[off+offLenOp:])
+	return int(v &^ 0x7)
 }
 
 func (d *Device) entCmdId(off int) uint16 {
-	return *(*uint16)(unsafe.Pointer(&d.mmap[off+offCmdId]))
+	return binary.LittleEndian.Uint16(d.mmap[off+offCmdId:])
 }
+
 func (d *Device) setEntCmdId(off int, id uint16) {
-	*(*uint16)(unsafe.Pointer(&d.mmap[off+offCmdId])) = id
+	binary.LittleEndian.PutUint16(d.mmap[off+offCmdId:], id)
 }
+
 func (d *Device) entKflags(off int) uint8 {
-	return *(*uint8)(unsafe.Pointer(&d.mmap[off+offKFlags]))
+	return d.mmap[off+offKFlags]
 }
+
 func (d *Device) entUflags(off int) uint8 {
-	return *(*uint8)(unsafe.Pointer(&d.mmap[off+offUFlags]))
+	return d.mmap[off+offUFlags]
 }
 
 func (d *Device) setEntUflagUnknownOp(off int) {
@@ -121,19 +120,19 @@ struct tcmu_cmd_entry {
 */
 
 func (d *Device) entReqIovCnt(off int) uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[off+offReqIovCnt]))
+	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovCnt:])
 }
 
 func (d *Device) entReqIovBidiCnt(off int) uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[off+offReqIovBidiCnt]))
+	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovBidiCnt:])
 }
 
 func (d *Device) entReqIovDifCnt(off int) uint32 {
-	return *(*uint32)(unsafe.Pointer(&d.mmap[off+offReqIovDifCnt]))
+	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovDifCnt:])
 }
 
 func (d *Device) entReqCdbOff(off int) uint64 {
-	return *(*uint64)(unsafe.Pointer(&d.mmap[off+offReqCdbOff]))
+	return binary.LittleEndian.Uint64(d.mmap[off+offReqCdbOff:])
 }
 
 func (d *Device) setEntRespSCSIStatus(off int, status byte) {
@@ -143,19 +142,21 @@ func (d *Device) setEntRespSCSIStatus(off int, status byte) {
 func (d *Device) copyEntRespSenseData(off int, data []byte) {
 	buf := d.mmap[off+offRespSense : off+offRespSense+tcmuSenseBufferSize]
 	copy(buf, data)
-	if len(data) < tcmuSenseBufferSize {
-		for i := len(data); i < tcmuSenseBufferSize; i++ {
-			buf[i] = 0
-		}
-	}
+	clear(buf[len(data):])
 }
 
 func (d *Device) entIovecN(off int, idx int) []byte {
-	out := syscall.Iovec{}
-	p := unsafe.Pointer(&d.mmap[off+offReqIov0Base])
-	out = *(*syscall.Iovec)(unsafe.Pointer(uintptr(p) + uintptr(idx)*unsafe.Sizeof(out)))
-	moff := *(*int)(unsafe.Pointer(&out.Base))
-	return d.mmap[moff : moff+int(out.Len)]
+	baseOff := off + offReqIov0Base + idx*iovSize
+	lenOff := baseOff + iovPtrWidth
+	var base, length int
+	if iovPtrWidth == 8 {
+		base = int(binary.LittleEndian.Uint64(d.mmap[baseOff:]))
+		length = int(binary.LittleEndian.Uint64(d.mmap[lenOff:]))
+	} else {
+		base = int(binary.LittleEndian.Uint32(d.mmap[baseOff:]))
+		length = int(binary.LittleEndian.Uint32(d.mmap[lenOff:]))
+	}
+	return d.mmap[base : base+length]
 }
 
 func (d *Device) entCdb(off int) []byte {
