@@ -1,10 +1,21 @@
 package tcmu
 
 import (
+	"context"
+	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"testing"
+	"time"
+
+	"go.uber.org/goleak"
+	"golang.org/x/sys/unix"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestWrite(t *testing.T) {
 	var tests = []struct {
@@ -154,7 +165,6 @@ func TestDevReady(t *testing.T) {
 			f = MultiThreadedDevReady(tt.s, tt.threads)
 		} else {
 			f = SingleThreadedDevReady(tt.s)
-
 		}
 		cmdChan := make(chan *SCSICmd, 3)
 		respChan := make(chan SCSIResponse, 3)
@@ -167,7 +177,83 @@ func TestDevReady(t *testing.T) {
 			t.Fatalf("[%02d] test %q, unexpected command id in response:\n- want: %v\n-  got: %v",
 				i, tt.desc, want, got)
 		}
-		close(cmdChan)
-		close(respChan)
+		close(cmdChan) // Signal handler goroutine to exit.
+		// Handler goroutine closes respChan — drain remaining to let it complete.
+		for range respChan {
+		}
+	}
+}
+
+func TestPollCancelShutdown(t *testing.T) {
+	// Create a pipe to simulate the UIO fd.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := &Device{
+		scsi: &SCSIHandler{},
+	}
+	d.uioFd = int(r.Fd())
+
+	// Create epoll + eventfd.
+	d.epollFd, err = unix.EpollCreate1(unix.EPOLL_CLOEXEC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(d.epollFd)
+
+	d.cancelFd, err = unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(d.cancelFd)
+
+	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.uioFd,
+		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.uioFd)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.cancelFd,
+		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.cancelFd)}); err != nil {
+		t.Fatal(err)
+	}
+
+	d.cmdChan = make(chan *SCSICmd, 5)
+	d.respChan = make(chan SCSIResponse, 5)
+
+	// Derive cancellable context and store cancel func (mirrors start()).
+	ctx, d.ctxCancel = context.WithCancel(ctx)
+
+	// Start watcher + beginPoll goroutines.
+	d.wg.Add(2)
+	go func() {
+		defer d.wg.Done()
+		<-ctx.Done()
+		var buf [8]byte
+		binary.LittleEndian.PutUint64(buf[:], 1)
+		unix.Write(d.cancelFd, buf[:]) //nolint:errcheck
+	}()
+	go d.beginPoll(ctx)
+
+	// Cancel context — should cause watcher to signal eventfd, beginPoll to exit.
+	cancel()
+
+	// Wait with timeout — if goroutines leak, this will timeout.
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success — goroutines exited cleanly.
+	case <-time.After(3 * time.Second):
+		t.Fatal("goroutines did not exit within 3 seconds after context cancellation")
 	}
 }

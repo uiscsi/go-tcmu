@@ -329,6 +329,7 @@ func BasicSCSIHandler(rw ReadWriterAt) *SCSIHandler {
 func SingleThreadedDevReady(h SCSICmdHandler) DevReadyFunc {
 	return func(in chan *SCSICmd, out chan SCSIResponse) error {
 		go func(h SCSICmdHandler, in chan *SCSICmd, out chan SCSIResponse) {
+			defer close(out)
 			// Use io.Copy's trick
 			buf := make([]byte, 32*1024)
 			for {
@@ -353,6 +354,7 @@ func SingleThreadedDevReady(h SCSICmdHandler) DevReadyFunc {
 func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 	return func(in chan *SCSICmd, out chan SCSIResponse) error {
 		go func(h SCSICmdHandler, in chan *SCSICmd, out chan SCSIResponse, threads int) {
+			defer close(out)
 			w := sync.WaitGroup{}
 			w.Add(threads)
 			for i := 0; i < threads; i++ {
