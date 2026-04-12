@@ -209,7 +209,9 @@ func EmulateReadCapacity16(cmd *SCSICmd) (SCSIResponse, error) {
 	// This is in BlockSize
 	order.PutUint32(buf[8:12], uint32(cmd.Device().Sizes().BlockSize))
 	// All the rest is 0
-	cmd.Write(buf)
+	if _, err := cmd.Write(buf); err != nil {
+		return SCSIResponse{}, err
+	}
 	return cmd.Ok(), nil
 }
 
