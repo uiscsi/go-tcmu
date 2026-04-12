@@ -65,6 +65,9 @@ func (d *Device) recvResponse(ctx context.Context) {
 		n, err := unix.Write(d.uioFd, buf)
 		if n == -1 && err != nil {
 			d.logger().ErrorContext(ctx, "tcmu: poll write error", "err", err)
+			// Drain remaining responses so handler goroutines are not blocked.
+			for range d.respChan {
+			}
 			return
 		}
 	}
