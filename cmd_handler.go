@@ -3,10 +3,11 @@ package tcmu
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"log/slog"
 
-	"github.com/coreos/go-tcmu/scsi"
-	"github.com/prometheus/common/log"
+	"github.com/uiscsi/go-tcmu/scsi"
 )
 
 // SCSICmdHandler is a simple request/response handler for SCSI commands coming to TCMU.
@@ -53,7 +54,7 @@ func (h ReadWriterAtCmdHandler) HandleCommand(cmd *SCSICmd) (SCSIResponse, error
 	case scsi.Write6, scsi.Write10, scsi.Write12, scsi.Write16:
 		return EmulateWrite(cmd, h.RW)
 	default:
-		log.Debugf("Ignore unknown SCSI command 0x%x\n", cmd.Command())
+		slog.Debug("tcmu: unhandled SCSI command", "opcode", fmt.Sprintf("0x%02x", cmd.Command()))
 	}
 	return cmd.NotHandled(), nil
 }
@@ -100,7 +101,7 @@ func EmulateStdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 
 func EmulateEvpdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	vpdType := cmd.GetCDB(2)
-	log.Debugf("SCSI EVPD Inquiry 0x%x\n", vpdType)
+	slog.Debug("tcmu: EVPD inquiry", "page", fmt.Sprintf("0x%02x", vpdType))
 	switch vpdType {
 	case 0x0: // Supported VPD pages
 		// The absolute minimum.
@@ -313,7 +314,9 @@ func EmulateModeSelect(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 	/* Verify what was selected is identical to what sense returns, since we
 	don't support actually setting anything. */
 	if !bytes.Equal(inBuf[hdrLen:len(b)], b) {
-		log.Errorf("not equal for some reason: %#v %#v", inBuf[hdrLen:len(b)], b)
+		slog.Error("tcmu: mode select mismatch",
+			"received", fmt.Sprintf("%#v", inBuf[hdrLen:len(b)]),
+			"expected", fmt.Sprintf("%#v", b))
 		return cmd.CheckCondition(scsi.SenseIllegalRequest, scsi.AscInvalidFieldInParameterList), nil
 	}
 	return cmd.Ok(), nil
@@ -331,20 +334,20 @@ func EmulateRead(cmd *SCSICmd, r io.ReaderAt) (SCSIResponse, error) {
 	}
 	n, err := r.ReadAt(cmd.Buf[:length], int64(offset))
 	if err != nil {
-		log.Errorln("read/read failed: error:", err)
+		slog.Error("tcmu: read failed", "op", "ReadAt", "err", err)
 		return cmd.MediumError(), nil
 	}
 	if n < length {
-		log.Errorln("read/read failed: unable to copy enough")
+		slog.Error("tcmu: read failed", "op", "ReadAt", "reason", "short read", "got", n, "want", length)
 		return cmd.MediumError(), nil
 	}
 	n, err = cmd.Write(cmd.Buf[:length])
 	if err != nil {
-		log.Errorln("read/write failed: error:", err)
+		slog.Error("tcmu: read failed", "op", "Write", "err", err)
 		return cmd.MediumError(), nil
 	}
 	if n < length {
-		log.Errorln("read/write failed: unable to copy enough")
+		slog.Error("tcmu: read failed", "op", "Write", "reason", "short write", "got", n, "want", length)
 		return cmd.MediumError(), nil
 	}
 	return cmd.Ok(), nil
@@ -362,20 +365,20 @@ func EmulateWrite(cmd *SCSICmd, r io.WriterAt) (SCSIResponse, error) {
 	}
 	n, err := cmd.Read(cmd.Buf[:int(length)])
 	if err != nil {
-		log.Errorln("write/read failed: error:", err)
+		slog.Error("tcmu: write failed", "op", "Read", "err", err)
 		return cmd.MediumError(), nil
 	}
 	if n < length {
-		log.Errorln("write/read failed: unable to copy enough")
+		slog.Error("tcmu: write failed", "op", "Read", "reason", "short read", "got", n, "want", length)
 		return cmd.MediumError(), nil
 	}
 	n, err = r.WriteAt(cmd.Buf[:length], int64(offset))
 	if err != nil {
-		log.Errorln("write/write failed: error:", err)
+		slog.Error("tcmu: write failed", "op", "WriteAt", "err", err)
 		return cmd.MediumError(), nil
 	}
 	if n < length {
-		log.Errorln("write/write failed: unable to copy enough")
+		slog.Error("tcmu: write failed", "op", "WriteAt", "reason", "short write", "got", n, "want", length)
 		return cmd.MediumError(), nil
 	}
 	return cmd.Ok(), nil

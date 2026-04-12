@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 
-	"github.com/coreos/go-tcmu/scsi"
-	"github.com/prometheus/common/log"
+	"github.com/uiscsi/go-tcmu/scsi"
 )
 
 // SCSICmd represents a single SCSI command recieved from the kernel to the virtual target.
@@ -69,7 +69,7 @@ func (c *SCSICmd) LBA() uint64 {
 	case 16:
 		return uint64(order.Uint64(c.cdb[2:10]))
 	default:
-		log.Errorf("What LBA has this length: %d", c.CdbLen())
+		slog.Error("tcmu: unexpected CDB length in LBA", "length", c.CdbLen())
 		panic("unusal scsi command length")
 	}
 }
@@ -87,7 +87,7 @@ func (c *SCSICmd) XferLen() uint32 {
 	case 16:
 		return uint32(order.Uint32(c.cdb[10:14]))
 	default:
-		log.Errorf("What XferLen has this length: %d", c.CdbLen())
+		slog.Error("tcmu: unexpected CDB length in XferLen", "length", c.CdbLen())
 		panic("unusal scsi command length")
 	}
 }
@@ -238,6 +238,8 @@ type SCSIHandler struct {
 	// to handle commands coming in the first channel, and send their associated
 	// responses down the second channel, ordering optional.
 	DevReady DevReadyFunc
+	// Logger is an optional structured logger. If nil, slog.Default() is used.
+	Logger *slog.Logger
 }
 
 type DevReadyFunc func(chan *SCSICmd, chan SCSIResponse) error
@@ -332,14 +334,13 @@ func SingleThreadedDevReady(h SCSICmdHandler) DevReadyFunc {
 			for {
 				v, ok := <-in
 				if !ok {
-					close(out)
 					return
 				}
 				v.Buf = buf
 				x, err := h.HandleCommand(v)
 				buf = v.Buf
 				if err != nil {
-					log.Error(err)
+					slog.Error("tcmu: command handler error", "err", err)
 					return
 				}
 				out <- x
@@ -366,7 +367,7 @@ func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 						x, err := h.HandleCommand(v)
 						buf = v.Buf
 						if err != nil {
-							log.Error(err)
+							slog.Error("tcmu: command handler error", "err", err)
 							return
 						}
 						out <- x
@@ -375,7 +376,6 @@ func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 				}(h, in, out, &w)
 			}
 			w.Wait()
-			close(out)
 		}(h, in, out, threads)
 		return nil
 	}

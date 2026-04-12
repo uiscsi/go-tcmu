@@ -3,8 +3,7 @@ package tcmu
 import (
 	"fmt"
 
-	"github.com/coreos/go-tcmu/scsi"
-	"github.com/prometheus/common/log"
+	"github.com/uiscsi/go-tcmu/scsi"
 	"golang.org/x/sys/unix"
 )
 
@@ -21,13 +20,13 @@ func (d *Device) beginPoll() {
 		var err error
 		n, err = unix.Read(d.uioFd, buf)
 		if n == -1 && err != nil {
-			log.Errorf("error poll reading: %s", err)
+			d.logger().Error("tcmu: poll read error", "err", err)
 			break
 		}
 		for {
 			cmd, err := d.getNextCommand()
 			if err != nil {
-				log.Errorf("error getting next command: %s", err)
+				d.logger().Error("tcmu: get next command failed", "err", err)
 				break
 			}
 			if cmd == nil {
@@ -48,7 +47,7 @@ func (d *Device) recvResponse() {
 		/* Tell the fd there's something new */
 		n, err = unix.Write(d.uioFd, buf)
 		if n == -1 && err != nil {
-			log.Errorf("error poll writing: %s", err)
+			d.logger().Error("tcmu: poll write error", "err", err)
 			return
 		}
 	}

@@ -4,7 +4,7 @@ package tcmu
 
 import (
 	"fmt"
-	"io/ioutil"
+	"log/slog"
 	"os"
 	"path"
 	"path/filepath"
@@ -14,9 +14,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/prometheus/common/log"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -46,6 +43,13 @@ type Device struct {
 type WWN interface {
 	DeviceID() string
 	NexusID() string
+}
+
+func (d *Device) logger() *slog.Logger {
+	if d.scsi.Logger != nil {
+		return d.scsi.Logger
+	}
+	return slog.Default()
 }
 
 func (d *Device) GetDevConfig() string {
@@ -123,7 +127,7 @@ func (d *Device) postEnableTcmu() error {
 	}
 
 	lunPath := d.getLunPath(prefix)
-	logrus.Debugf("Creating directory: %s", lunPath)
+	d.logger().Debug("tcmu: creating directory", "path", lunPath)
 	if err := os.MkdirAll(lunPath, 0755); err != nil && !os.IsExist(err) {
 		return err
 	} else if err == nil {
@@ -131,7 +135,9 @@ func (d *Device) postEnableTcmu() error {
 		d.toClean[path.Join(lunPath, d.scsi.VolumeName)] = true
 	}
 
-	logrus.Debugf("Linking: %s => %s", path.Join(lunPath, d.scsi.VolumeName), path.Join(d.hbaDir, d.scsi.VolumeName))
+	d.logger().Debug("tcmu: linking lun",
+		"from", path.Join(lunPath, d.scsi.VolumeName),
+		"to", path.Join(d.hbaDir, d.scsi.VolumeName))
 	if err := os.Symlink(path.Join(d.hbaDir, d.scsi.VolumeName), path.Join(lunPath, d.scsi.VolumeName)); err != nil {
 		return err
 	}
@@ -154,7 +160,7 @@ func (d *Device) createDevEntry() error {
 
 	tgt, _ := d.getSCSIPrefixAndWnn()
 
-	address, err := ioutil.ReadFile(path.Join(tgt, "address"))
+	address, err := os.ReadFile(path.Join(tgt, "address"))
 	if err != nil {
 		return err
 	}
@@ -170,7 +176,7 @@ func (d *Device) createDevEntry() error {
 			break
 		}
 
-		logrus.Debugf("Waiting for %s", path)
+		d.logger().Debug("tcmu: waiting for device", "path", path)
 		time.Sleep(1 * time.Second)
 	}
 
@@ -186,7 +192,7 @@ func (d *Device) createDevEntry() error {
 		return fmt.Errorf("Too many matches for %s, found %d", path, len(matches))
 	}
 
-	majorMinor, err := ioutil.ReadFile(matches[0])
+	majorMinor, err := os.ReadFile(matches[0])
 	if err != nil {
 		return err
 	}
@@ -205,7 +211,7 @@ func (d *Device) createDevEntry() error {
 		return err
 	}
 
-	logrus.Debugf("Creating device %s %d:%d", dev, major, minor)
+	d.logger().Debug("tcmu: creating device", "path", dev, "major", major, "minor", minor)
 	return mknod(dev, major, minor)
 }
 
@@ -220,7 +226,7 @@ func mknod(device string, major, minor int) error {
 func (d *Device) writeLines(target string, lines []string) error {
 	dir := path.Dir(target)
 	if stat, err := os.Stat(dir); os.IsNotExist(err) {
-		logrus.Debugf("Creating directory: %s", dir)
+		d.logger().Debug("tcmu: creating directory", "path", dir)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
@@ -231,9 +237,9 @@ func (d *Device) writeLines(target string, lines []string) error {
 
 	for _, line := range lines {
 		content := []byte(line + "\n")
-		logrus.Debugf("Setting %s: %s", target, line)
-		if err := ioutil.WriteFile(target, content, 0755); err != nil {
-			logrus.Errorf("Failed to write %s to %s: %v", line, target, err)
+		d.logger().Debug("tcmu: configfs write", "target", target, "line", line)
+		if err := os.WriteFile(target, content, 0755); err != nil {
+			d.logger().Error("tcmu: configfs write failed", "line", line, "target", target, "err", err)
 			return err
 		}
 	}
@@ -265,19 +271,19 @@ func (d *Device) findDevice() error {
 			return nil
 		}
 		sysfile := fmt.Sprintf("/sys/class/uio/%s/name", i.Name())
-		bytes, err := ioutil.ReadFile(sysfile)
+		bytes, err := os.ReadFile(sysfile)
 		if err != nil {
 			return err
 		}
 		split := strings.SplitN(strings.TrimRight(string(bytes), "\n"), "/", 4)
 		if split[0] != "tcm-user" {
 			// Not a TCM device
-			log.Debugf("%s is not a tcm-user device", i.Name())
+			d.logger().Debug("tcmu: not a tcm-user device", "uio", i.Name())
 			return nil
 		}
 		if split[3] != d.GetDevConfig() {
-			// Not a TCM device
-			log.Debugf("%s is not our tcm-user device", i.Name())
+			// Not our TCM device
+			d.logger().Debug("tcmu: not our tcm-user device", "uio", i.Name())
 			return nil
 		}
 		err = d.openDevice(split[1], split[2], i.Name())
@@ -300,7 +306,7 @@ func (d *Device) openDevice(user string, vol string, uio string) error {
 	if err != nil {
 		return err
 	}
-	bytes, err := ioutil.ReadFile(fmt.Sprintf("/sys/class/uio/%s/maps/map0/size", uio))
+	bytes, err := os.ReadFile(fmt.Sprintf("/sys/class/uio/%s/maps/map0/size", uio))
 	if err != nil {
 		return err
 	}
@@ -315,13 +321,15 @@ func (d *Device) openDevice(user string, vol string, uio string) error {
 }
 
 func (d *Device) debugPrintMb() {
-	log.Debugf("Got a TCMU mailbox, version: %d\n", d.mbVersion())
-	log.Debugf("mapsize: %d\n", d.mapsize)
-	log.Debugf("mbFlags: %d\n", d.mbFlags())
-	log.Debugf("mbCmdrOffset: %d\n", d.mbCmdrOffset())
-	log.Debugf("mbCmdrSize: %d\n", d.mbCmdrSize())
-	log.Debugf("mbCmdHead: %d\n", d.mbCmdHead())
-	log.Debugf("mbCmdTail: %d\n", d.mbCmdTail())
+	d.logger().Debug("tcmu: mailbox info",
+		"version", d.mbVersion(),
+		"mapsize", d.mapsize,
+		"flags", d.mbFlags(),
+		"cmdrOffset", d.mbCmdrOffset(),
+		"cmdrSize", d.mbCmdrSize(),
+		"cmdHead", d.mbCmdHead(),
+		"cmdTail", d.mbCmdTail(),
+	)
 }
 
 func (d *Device) teardown() error {
@@ -349,7 +357,7 @@ func (d *Device) teardown() error {
 		if k, _ := d.toClean[p]; k {
 			err := remove(p)
 			if err != nil {
-				logrus.Errorf("Failed to remove: %v", err)
+				d.logger().Error("tcmu: remove failed", "err", err)
 			}
 		}
 	}
@@ -368,12 +376,13 @@ func (d *Device) teardown() error {
 }
 
 func removeAsync(path string, done chan<- error) {
-	logrus.Debugf("Removing: %s", path)
+	slog.Debug("tcmu: removing", "path", path)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		logrus.Errorf("Unable to remove: %v", path)
+		slog.Error("tcmu: unable to remove", "path", path)
 		done <- err
+		return
 	}
-	logrus.Debugf("Removed: %s", path)
+	slog.Debug("tcmu: removed", "path", path)
 	done <- nil
 }
 
