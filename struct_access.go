@@ -165,8 +165,14 @@ func (d *Device) entIovecN(off int, idx int) []byte {
 
 func (d *Device) entCdb(off int) []byte {
 	cdbStart := int(d.entReqCdbOff(off))
-	len := d.cdbLen(cdbStart)
-	return d.mmap[cdbStart : cdbStart+len]
+	if cdbStart < 0 || cdbStart >= len(d.mmap) {
+		panic(fmt.Sprintf("tcmu: cdb offset %d out of mmap bounds %d", cdbStart, len(d.mmap)))
+	}
+	cdbLength := d.cdbLen(cdbStart)
+	if cdbStart+cdbLength > len(d.mmap) {
+		panic(fmt.Sprintf("tcmu: cdb range [%d:%d] exceeds mmap size %d", cdbStart, cdbStart+cdbLength, len(d.mmap)))
+	}
+	return d.mmap[cdbStart : cdbStart+cdbLength]
 }
 
 func (d *Device) cdbLen(cdbStart int) int {
