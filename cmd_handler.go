@@ -228,14 +228,15 @@ func charToHex(c byte) (byte, bool) {
 	return 0x00, false
 }
 
-func CachingModePage(w io.Writer, wce bool) {
+func CachingModePage(w io.Writer, wce bool) error {
 	buf := make([]byte, 20)
 	buf[0] = 0x08 // caching mode page
 	buf[1] = 0x12 // page length (20, forced)
 	if wce {
 		buf[2] = buf[2] | 0x04
 	}
-	w.Write(buf)
+	_, err := w.Write(buf)
+	return err
 }
 
 // EmulateModeSense responds to a static Mode Sense command. `wce` enables or diables
@@ -246,7 +247,9 @@ func EmulateModeSense(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 
 	page := cmd.GetCDB(2)
 	if page == 0x3f || page == 0x08 {
-		CachingModePage(pgs, wce)
+		if err := CachingModePage(pgs, wce); err != nil {
+			return SCSIResponse{}, err
+		}
 	}
 	scsiCmd := cmd.Command()
 
@@ -311,7 +314,9 @@ func EmulateModeSelect(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 	pgs := &bytes.Buffer{}
 	// TODO(barakmich): select over handlers. Today we have one.
 	if page == 0x08 && subpage == 0 {
-		CachingModePage(pgs, wce)
+		if err := CachingModePage(pgs, wce); err != nil {
+			return SCSIResponse{}, err
+		}
 		gotSense = true
 	}
 	if !gotSense {
