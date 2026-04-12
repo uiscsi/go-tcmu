@@ -229,6 +229,19 @@ type SCSIResponse struct {
 	senseBuffer []byte
 }
 
+// Status returns the SAM status byte for this response.
+// Common values: 0x00 = GOOD, 0x02 = CHECK CONDITION.
+// See [scsi.SamStatGood], [scsi.SamStatCheckCondition] for named constants.
+func (r SCSIResponse) Status() byte {
+	return r.status
+}
+
+// SenseBuffer returns the sense data bytes associated with a CHECK CONDITION
+// response, or nil if none were set.
+func (r SCSIResponse) SenseBuffer() []byte {
+	return r.senseBuffer
+}
+
 // SCSIHandler is the high-level data for the emulated SCSI device.
 type SCSIHandler struct {
 	// The volume name and resultant device name.
