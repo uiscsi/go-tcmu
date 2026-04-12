@@ -26,6 +26,7 @@ type InquiryInfo struct {
 	VendorID   string
 	ProductID  string
 	ProductRev string
+	DeviceType byte // peripheral device type (SPC-4 table 83); 0x00=disk (default), 0x01=tape
 }
 
 var defaultInquiry = InquiryInfo{
@@ -81,7 +82,8 @@ func FixedString(s string, length int) []byte {
 
 func EmulateStdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	buf := make([]byte, 36)
-	buf[2] = 0x05 // SPC-3
+	buf[0] = inq.DeviceType // peripheral device type (SPC-4 table 83)
+	buf[2] = 0x05           // SPC-3
 	buf[3] = 0x02 // response data format
 	buf[7] = 0x02 // CmdQue
 	vendorID := FixedString(inq.VendorID, 8)
