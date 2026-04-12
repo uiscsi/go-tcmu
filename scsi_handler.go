@@ -21,6 +21,8 @@ type SCSICmd struct {
 	offset    int
 	vecoffset int
 	device    *Device
+	entryOff  int    // ring buffer offset of this command entry (for response completion)
+	entryLen  uint32 // ring buffer entry length (for tail advancement after response)
 
 	// Buf, if provided, may be used as a scratch buffer for copying data to and from the kernel.
 	Buf []byte
@@ -149,8 +151,10 @@ func (c *SCSICmd) Device() *Device {
 // Ok creates a SCSIResponse to this command with SAM_STAT_GOOD, the common case for commands that succeed.
 func (c *SCSICmd) Ok() SCSIResponse {
 	return SCSIResponse{
-		id:     c.id,
-		status: scsi.SamStatGood,
+		id:       c.id,
+		status:   scsi.SamStatGood,
+		entryOff: c.entryOff,
+		entryLen: c.entryLen,
 	}
 }
 
@@ -162,8 +166,10 @@ func (c *SCSICmd) GetCDB(index int) byte {
 // RespondStatus returns a SCSIResponse with the given status byte set. Ok() is equivalent to RespondStatus(scsi.SamStatGood).
 func (c *SCSICmd) RespondStatus(status byte) SCSIResponse {
 	return SCSIResponse{
-		id:     c.id,
-		status: status,
+		id:       c.id,
+		status:   status,
+		entryOff: c.entryOff,
+		entryLen: c.entryLen,
 	}
 }
 
@@ -173,6 +179,8 @@ func (c *SCSICmd) RespondSenseData(status byte, sense []byte) SCSIResponse {
 		id:          c.id,
 		status:      status,
 		senseBuffer: sense,
+		entryOff:    c.entryOff,
+		entryLen:    c.entryLen,
 	}
 }
 
@@ -189,6 +197,8 @@ func (c *SCSICmd) NotHandled() SCSIResponse {
 		id:          c.id,
 		status:      scsi.SamStatCheckCondition,
 		senseBuffer: buf,
+		entryOff:    c.entryOff,
+		entryLen:    c.entryLen,
 	}
 }
 
@@ -204,6 +214,8 @@ func (c *SCSICmd) CheckCondition(key byte, asc uint16) SCSIResponse {
 		id:          c.id,
 		status:      scsi.SamStatCheckCondition,
 		senseBuffer: buf,
+		entryOff:    c.entryOff,
+		entryLen:    c.entryLen,
 	}
 }
 
@@ -227,6 +239,8 @@ type SCSIResponse struct {
 	id          uint16
 	status      byte
 	senseBuffer []byte
+	entryOff    int  // ring buffer offset for response completion
+	entryLen    uint32 // ring buffer entry length for tail advancement
 }
 
 // Status returns the SAM status byte for this response.

@@ -74,19 +74,13 @@ func (d *Device) recvResponse(ctx context.Context) {
 }
 
 func (d *Device) completeCommand(resp SCSIResponse) {
-	off := d.tailEntryOff()
-	for d.entHdrOp(off) != tcmuOpCmd {
-		d.mbSetTail((d.mbCmdTail() + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize())
-		off = d.tailEntryOff()
-	}
-	if d.entCmdId(off) != resp.id {
-		d.setEntCmdId(off, resp.id)
-	}
+	off := resp.entryOff
 	d.setEntRespSCSIStatus(off, resp.status)
 	if resp.status != scsi.SamStatGood {
 		d.copyEntRespSenseData(off, resp.senseBuffer)
 	}
-	d.mbSetTail((d.mbCmdTail() + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize())
+	// Advance kernel-visible tail past this entry now that the response is written.
+	d.mbSetTail((d.mbCmdTail() + resp.entryLen) % d.mbCmdrSize())
 }
 
 func (d *Device) getNextCommand() (*SCSICmd, error) {
@@ -96,9 +90,12 @@ func (d *Device) getNextCommand() (*SCSICmd, error) {
 			d.cmdTail = (d.cmdTail + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize()
 			d.mbSetTail(d.cmdTail)
 		} else if d.entHdrOp(off) == tcmuOpCmd {
+			entLen := uint32(d.entHdrGetLen(off))
 			out := &SCSICmd{
-				id:     d.entCmdId(off),
-				device: d,
+				id:       d.entCmdId(off),
+				device:   d,
+				entryOff: off,
+				entryLen: entLen,
 			}
 			out.cdb = d.entCdb(off)
 			vecs := int(d.entReqIovCnt(off))
@@ -107,8 +104,9 @@ func (d *Device) getNextCommand() (*SCSICmd, error) {
 				v := d.entIovecN(off, i)
 				out.vecs[i] = v
 			}
-			d.cmdTail = (d.cmdTail + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize()
-			d.mbSetTail(d.cmdTail)
+			// Advance local read pointer but do NOT update kernel-visible tail yet.
+			// The tail is advanced in completeCommand after the response is written.
+			d.cmdTail = (d.cmdTail + entLen) % d.mbCmdrSize()
 			return out, nil
 		} else {
 			panic(fmt.Sprintf("unsupported command from tcmu? %d", d.entHdrOp(off)))
