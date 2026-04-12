@@ -359,11 +359,12 @@ func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 			w.Add(threads)
 			for i := 0; i < threads; i++ {
 				go func(h SCSICmdHandler, in chan *SCSICmd, out chan SCSIResponse, w *sync.WaitGroup) {
+					defer w.Done()
 					buf := make([]byte, 32*1024)
 					for {
 						v, ok := <-in
 						if !ok {
-							break
+							return
 						}
 						v.Buf = buf
 						x, err := h.HandleCommand(v)
@@ -374,7 +375,6 @@ func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 						}
 						out <- x
 					}
-					w.Done()
 				}(h, in, out, &w)
 			}
 			w.Wait()
