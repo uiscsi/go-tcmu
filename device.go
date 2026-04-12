@@ -390,7 +390,7 @@ func (d *Device) findDevice() error {
 func (d *Device) openDevice(user string, vol string, uio string) error {
 	var err error
 	d.deviceName = vol
-	//d.uioFd, err = syscall.Open(fmt.Sprintf("/dev/%s", uio), syscall.O_RDWR|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0600)
+	// O_NONBLOCK is intentionally omitted: blocking mode is required because epoll handles readiness.
 	d.uioFd, err = syscall.Open(fmt.Sprintf("/dev/%s", uio), syscall.O_RDWR|syscall.O_CLOEXEC, 0600)
 	if err != nil {
 		return err
