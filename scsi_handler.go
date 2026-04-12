@@ -58,10 +58,8 @@ func (c *SCSICmd) LBA() uint64 {
 	switch c.CdbLen() {
 	case 6:
 		// SPC-4: LBA field is bytes 1[4:0] || byte 2 || byte 3 (21-bit field)
+		// LBA 0 is a valid block address (first block); do NOT apply 0-means-256 here.
 		lba := (uint32(c.cdb[1]&0x1f) << 16) | (uint32(c.cdb[2]) << 8) | uint32(c.cdb[3])
-		if lba == 0 {
-			return 256
-		}
 		return uint64(lba)
 	case 10:
 		return uint64(order.Uint32(c.cdb[2:6]))
@@ -80,7 +78,12 @@ func (c *SCSICmd) XferLen() uint32 {
 	order := binary.BigEndian
 	switch c.CdbLen() {
 	case 6:
-		return uint32(c.cdb[4])
+		// SBC-3 5.7: a transfer length of 0 in READ(6)/WRITE(6) means 256 blocks.
+		n := uint32(c.cdb[4])
+		if n == 0 {
+			return 256
+		}
+		return n
 	case 10:
 		return uint32(order.Uint16(c.cdb[7:9]))
 	case 12:
