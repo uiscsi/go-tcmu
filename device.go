@@ -3,6 +3,8 @@
 package tcmu
 
 import (
+	"context"
+	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -29,11 +32,15 @@ type Device struct {
 	deviceName string
 
 	uioFd    int
+	cancelFd int        // eventfd for cancellation
+	epollFd  int        // epoll instance
 	mapsize  uint64
 	mmap     []byte
 	cmdChan  chan *SCSICmd
 	respChan chan SCSIResponse
 	cmdTail  uint32
+	wg        sync.WaitGroup
+	ctxCancel context.CancelFunc // stored to ensure watcher goroutine exits in Close()
 
 	toClean map[string]bool
 }
@@ -62,33 +69,51 @@ func (d *Device) Sizes() DataSizes {
 
 // OpenTCMUDevice creates the virtual device based on the details in the SCSIHandler, eventually creating a device under devPath (eg, "/dev") with the file name scsi.VolumeName.
 // The returned Device represents the open device connection to the kernel, and must be closed.
-func OpenTCMUDevice(devPath string, scsi *SCSIHandler) (*Device, error) {
+// The provided context controls the lifetime of the poll goroutine; cancel it (or use Close) to shut down cleanly.
+func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*Device, error) {
 	d := &Device{
-		scsi:    scsi,
-		devPath: devPath,
-		uioFd:   -1,
-		hbaDir:  fmt.Sprintf(configDirFmt, scsi.HBA),
-		toClean: make(map[string]bool),
+		scsi:     scsi,
+		devPath:  devPath,
+		uioFd:    -1,
+		cancelFd: -1,
+		epollFd:  -1,
+		hbaDir:   fmt.Sprintf(configDirFmt, scsi.HBA),
+		toClean:  make(map[string]bool),
 	}
 	if err := d.preEnableTcmu(); err != nil {
 		return d, err
 	}
-	if err := d.start(); err != nil {
+	if err := d.start(ctx); err != nil {
 		return d, err
 	}
-
 	return d, d.postEnableTcmu()
 }
 
 func (d *Device) Close() error {
-	err := d.teardown()
-	if err != nil {
-		return err
+	// Cancel the context — this causes the watcher goroutine to write to eventfd
+	// and exit, which in turn causes beginPoll to exit via epoll.
+	if d.ctxCancel != nil {
+		d.ctxCancel()
 	}
-	if d.uioFd != -1 {
+
+	// Wait for all three goroutines (watcher, beginPoll, recvResponse) to exit.
+	d.wg.Wait()
+
+	// Clean up file descriptors.
+	if d.cancelFd >= 0 {
+		unix.Close(d.cancelFd)
+		d.cancelFd = -1
+	}
+	if d.epollFd >= 0 {
+		unix.Close(d.epollFd)
+		d.epollFd = -1
+	}
+	if d.uioFd >= 0 {
 		unix.Close(d.uioFd)
+		d.uioFd = -1
 	}
-	return nil
+
+	return d.teardown()
 }
 
 func (d *Device) preEnableTcmu() error {
@@ -247,16 +272,65 @@ func (d *Device) writeLines(target string, lines []string) error {
 	return nil
 }
 
-func (d *Device) start() (err error) {
-	err = d.findDevice()
-	if err != nil {
-		return
+func (d *Device) start(ctx context.Context) error {
+	if err := d.findDevice(); err != nil {
+		return err
 	}
+
+	var err error
+	d.epollFd, err = unix.EpollCreate1(unix.EPOLL_CLOEXEC)
+	if err != nil {
+		return fmt.Errorf("tcmu: epoll_create1: %w", err)
+	}
+
+	d.cancelFd, err = unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
+	if err != nil {
+		unix.Close(d.epollFd)
+		d.epollFd = -1
+		return fmt.Errorf("tcmu: eventfd: %w", err)
+	}
+
+	// Register UIO fd for read events.
+	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.uioFd,
+		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.uioFd)}); err != nil {
+		unix.Close(d.cancelFd)
+		d.cancelFd = -1
+		unix.Close(d.epollFd)
+		d.epollFd = -1
+		return fmt.Errorf("tcmu: epoll_ctl uioFd: %w", err)
+	}
+
+	// Register cancel fd for read events.
+	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.cancelFd,
+		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.cancelFd)}); err != nil {
+		unix.Close(d.cancelFd)
+		d.cancelFd = -1
+		unix.Close(d.epollFd)
+		d.epollFd = -1
+		return fmt.Errorf("tcmu: epoll_ctl cancelFd: %w", err)
+	}
+
 	d.cmdChan = make(chan *SCSICmd, 5)
 	d.respChan = make(chan SCSIResponse, 5)
-	go d.beginPoll()
-	d.scsi.DevReady(d.cmdChan, d.respChan)
-	return
+
+	// Derive a cancellable context so Close() can stop the watcher goroutine.
+	ctx, cancel := context.WithCancel(ctx)
+	d.ctxCancel = cancel
+
+	// Start context cancellation watcher — tracked by WaitGroup.
+	d.wg.Add(3)
+	go func() {
+		defer d.wg.Done()
+		<-ctx.Done()
+		// Signal poll goroutine via eventfd.
+		var buf [8]byte
+		binary.LittleEndian.PutUint64(buf[:], 1)
+		unix.Write(d.cancelFd, buf[:]) //nolint:errcheck
+	}()
+	go d.beginPoll(ctx)
+	go d.recvResponse(ctx)
+	d.scsi.DevReady(d.cmdChan, d.respChan) //nolint:errcheck
+	return nil
 }
 
 func (d *Device) findDevice() error {

@@ -1,6 +1,7 @@
 package tcmu
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/uiscsi/go-tcmu/scsi"
@@ -11,43 +12,59 @@ const (
 	tcmuSenseBufferSize = 96
 )
 
-func (d *Device) beginPoll() {
-	// Entry point for the goroutine.
-	go d.recvResponse()
-	buf := make([]byte, 4)
+func (d *Device) beginPoll(ctx context.Context) {
+	defer d.wg.Done()
+	defer close(d.cmdChan)
+
+	events := make([]unix.EpollEvent, 2)
 	for {
-		var n int
-		var err error
-		n, err = unix.Read(d.uioFd, buf)
-		if n == -1 && err != nil {
-			d.logger().Error("tcmu: poll read error", "err", err)
-			break
+		n, err := unix.EpollWait(d.epollFd, events, -1)
+		if err != nil {
+			if err == unix.EINTR {
+				continue
+			}
+			d.logger().ErrorContext(ctx, "tcmu: epoll wait error", "err", err)
+			return
 		}
-		for {
-			cmd, err := d.getNextCommand()
-			if err != nil {
-				d.logger().Error("tcmu: get next command failed", "err", err)
-				break
+
+		cancelSeen := false
+		for i := range n {
+			if int(events[i].Fd) == d.cancelFd {
+				// Drain the eventfd.
+				var buf [8]byte
+				unix.Read(d.cancelFd, buf[:]) //nolint:errcheck
+				cancelSeen = true
+				continue
 			}
-			if cmd == nil {
-				break
+			// UIO fd readable — drain commands.
+			for {
+				cmd, err := d.getNextCommand()
+				if err != nil {
+					d.logger().ErrorContext(ctx, "tcmu: get next command failed", "err", err)
+					break
+				}
+				if cmd == nil {
+					break
+				}
+				d.cmdChan <- cmd
 			}
-			d.cmdChan <- cmd
+		}
+		if cancelSeen {
+			return
 		}
 	}
-	close(d.cmdChan)
 }
 
-func (d *Device) recvResponse() {
-	var n int
-	var err error
+func (d *Device) recvResponse(ctx context.Context) {
+	defer d.wg.Done()
+
 	buf := make([]byte, 4)
 	for resp := range d.respChan {
 		d.completeCommand(resp)
-		/* Tell the fd there's something new */
-		n, err = unix.Write(d.uioFd, buf)
+		// Notify kernel of completed command.
+		n, err := unix.Write(d.uioFd, buf)
 		if n == -1 && err != nil {
-			d.logger().Error("tcmu: poll write error", "err", err)
+			d.logger().ErrorContext(ctx, "tcmu: poll write error", "err", err)
 			return
 		}
 	}
@@ -70,15 +87,11 @@ func (d *Device) completeCommand(resp SCSIResponse) {
 }
 
 func (d *Device) getNextCommand() (*SCSICmd, error) {
-	//d.debugPrintMb()
-	//fmt.Printf("nextEntryOff: %d\n", d.nextEntryOff())
-	//fmt.Printf("headEntryOff: %d\n", d.headEntryOff())
 	for d.nextEntryOff() != d.headEntryOff() {
 		off := d.nextEntryOff()
 		if d.entHdrOp(off) == tcmuOpPad {
 			d.cmdTail = (d.cmdTail + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize()
 		} else if d.entHdrOp(off) == tcmuOpCmd {
-			//d.printEnt(off)
 			out := &SCSICmd{
 				id:     d.entCmdId(off),
 				device: d,
