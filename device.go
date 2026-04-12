@@ -67,6 +67,13 @@ func (d *Device) Sizes() DataSizes {
 	return d.scsi.DataSizes
 }
 
+// BackstorePath returns the configfs backstore path for this device.
+// This path is used for external LUN linking when ExternalFabric is true
+// (e.g., creating a symlink from a LIO iSCSI target LUN to this backstore).
+func (d *Device) BackstorePath() string {
+	return path.Join(d.hbaDir, d.scsi.VolumeName)
+}
+
 // OpenTCMUDevice creates the virtual device based on the details in the SCSIHandler, eventually creating a device under devPath (eg, "/dev") with the file name scsi.VolumeName.
 // The returned Device represents the open device connection to the kernel, and must be closed.
 // The provided context controls the lifetime of the poll goroutine; cancel it (or use Close) to shut down cleanly.
@@ -101,7 +108,26 @@ func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*De
 		_ = d.teardown()
 		return nil, err
 	}
-	return d, d.postEnableTcmu()
+	if !scsi.ExternalFabric {
+		if err := d.postEnableTcmu(); err != nil {
+			if d.ctxCancel != nil {
+				d.ctxCancel()
+				d.wg.Wait()
+			}
+			if d.cancelFd >= 0 {
+				unix.Close(d.cancelFd)
+			}
+			if d.epollFd >= 0 {
+				unix.Close(d.epollFd)
+			}
+			if d.uioFd >= 0 {
+				unix.Close(d.uioFd)
+			}
+			_ = d.teardown()
+			return nil, err
+		}
+	}
+	return d, nil
 }
 
 func (d *Device) Close() error {

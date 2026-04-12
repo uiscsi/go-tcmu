@@ -241,6 +241,11 @@ type SCSIHandler struct {
 	DevReady DevReadyFunc
 	// Logger is an optional structured logger. If nil, slog.Default() is used.
 	Logger *slog.Logger
+	// ExternalFabric, when true, skips loopback fabric setup and mknod
+	// in OpenTCMUDevice. The TCMU configfs backstore and UIO fd are still
+	// created. Use Device.BackstorePath() to get the configfs path for
+	// external LUN linking (e.g., LIO iSCSI fabric).
+	ExternalFabric bool
 }
 
 type DevReadyFunc func(chan *SCSICmd, chan SCSIResponse) error
