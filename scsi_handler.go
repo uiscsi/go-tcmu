@@ -72,7 +72,7 @@ func (c *SCSICmd) LBA() uint64 {
 		return uint64(order.Uint64(c.cdb[2:10]))
 	default:
 		slog.Error("tcmu: unexpected CDB length in LBA", "length", c.CdbLen())
-		panic("unusal scsi command length")
+		return 0
 	}
 }
 
@@ -95,7 +95,7 @@ func (c *SCSICmd) XferLen() uint32 {
 		return uint32(order.Uint32(c.cdb[10:14]))
 	default:
 		slog.Error("tcmu: unexpected CDB length in XferLen", "length", c.CdbLen())
-		panic("unusal scsi command length")
+		return 0
 	}
 }
 
