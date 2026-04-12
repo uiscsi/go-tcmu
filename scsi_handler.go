@@ -48,7 +48,10 @@ func (c *SCSICmd) CdbLen() int {
 	} else if opcode >= 0xa0 && opcode <= 0xbf {
 		return 12
 	}
-	panic(fmt.Sprintf("what opcode is %x", opcode))
+	// Opcodes 0x60-0x7e are reserved per SPC-4; 0xc0-0xff are vendor-specific.
+	// Return 0 rather than panicking so callers can detect and reject gracefully.
+	slog.Error("tcmu: unknown CDB opcode", "opcode", fmt.Sprintf("0x%02x", opcode))
+	return 0
 }
 
 // LBA returns the block address that this command wishes to access.
