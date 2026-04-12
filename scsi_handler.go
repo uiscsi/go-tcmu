@@ -57,11 +57,12 @@ func (c *SCSICmd) LBA() uint64 {
 
 	switch c.CdbLen() {
 	case 6:
-		val6 := uint8(order.Uint16(c.cdb[2:4]))
-		if val6 == 0 {
+		// SPC-4: LBA field is bytes 1[4:0] || byte 2 || byte 3 (21-bit field)
+		lba := (uint32(c.cdb[1]&0x1f) << 16) | (uint32(c.cdb[2]) << 8) | uint32(c.cdb[3])
+		if lba == 0 {
 			return 256
 		}
-		return uint64(val6)
+		return uint64(lba)
 	case 10:
 		return uint64(order.Uint32(c.cdb[2:6]))
 	case 12:
