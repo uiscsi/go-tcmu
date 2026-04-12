@@ -91,6 +91,7 @@ func (d *Device) getNextCommand() (*SCSICmd, error) {
 		off := d.nextEntryOff()
 		if d.entHdrOp(off) == tcmuOpPad {
 			d.cmdTail = (d.cmdTail + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize()
+			d.mbSetTail(d.cmdTail)
 		} else if d.entHdrOp(off) == tcmuOpCmd {
 			out := &SCSICmd{
 				id:     d.entCmdId(off),
@@ -104,6 +105,7 @@ func (d *Device) getNextCommand() (*SCSICmd, error) {
 				out.vecs[i] = v
 			}
 			d.cmdTail = (d.cmdTail + uint32(d.entHdrGetLen(off))) % d.mbCmdrSize()
+			d.mbSetTail(d.cmdTail)
 			return out, nil
 		} else {
 			panic(fmt.Sprintf("unsupported command from tcmu? %d", d.entHdrOp(off)))
