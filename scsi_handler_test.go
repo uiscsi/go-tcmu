@@ -184,6 +184,55 @@ func TestDevReady(t *testing.T) {
 	}
 }
 
+func TestInquiryDeviceType(t *testing.T) {
+	// Test 1: DeviceType=0x01 (tape) produces buf[0]=0x01
+	cdb := []byte{0x12, 0x00, 0x00, 0x00, 36, 0x00}
+	dataBuf := make([]byte, 36)
+	cmd := &SCSICmd{
+		cdb:  cdb,
+		vecs: [][]byte{dataBuf},
+	}
+	inq := &InquiryInfo{
+		VendorID:   "UISCSI",
+		ProductID:  "TAPE DRIVE",
+		ProductRev: "0001",
+		DeviceType: 0x01,
+	}
+	resp, err := EmulateStdInquiry(cmd, inq)
+	if err != nil {
+		t.Fatalf("EmulateStdInquiry returned error: %v", err)
+	}
+	if resp.status != 0 {
+		t.Fatalf("expected Ok status, got %d", resp.status)
+	}
+	if dataBuf[0] != 0x01 {
+		t.Fatalf("expected buf[0]=0x01 (tape), got 0x%02x", dataBuf[0])
+	}
+	// Verify vendor string is still correct
+	vendor := string(dataBuf[8:16])
+	if vendor != "UISCSI  " {
+		t.Fatalf("expected vendor 'UISCSI  ', got %q", vendor)
+	}
+
+	// Test 2: Zero-value InquiryInfo -> DeviceType=0x00 (disk, backward compat)
+	dataBuf2 := make([]byte, 36)
+	cmd2 := &SCSICmd{
+		cdb:  cdb,
+		vecs: [][]byte{dataBuf2},
+	}
+	inq2 := &InquiryInfo{}
+	resp2, err := EmulateStdInquiry(cmd2, inq2)
+	if err != nil {
+		t.Fatalf("EmulateStdInquiry returned error: %v", err)
+	}
+	if resp2.status != 0 {
+		t.Fatalf("expected Ok status, got %d", resp2.status)
+	}
+	if dataBuf2[0] != 0x00 {
+		t.Fatalf("expected buf[0]=0x00 (disk), got 0x%02x", dataBuf2[0])
+	}
+}
+
 func TestPollCancelShutdown(t *testing.T) {
 	// Create a pipe to simulate the UIO fd.
 	r, w, err := os.Pipe()
