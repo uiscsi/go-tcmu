@@ -313,7 +313,7 @@ func EmulateModeSelect(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 	}
 	/* Verify what was selected is identical to what sense returns, since we
 	don't support actually setting anything. */
-	if !bytes.Equal(inBuf[hdrLen:len(b)], b) {
+	if !bytes.Equal(inBuf[hdrLen:hdrLen+len(b)], b) {
 		slog.Error("tcmu: mode select mismatch",
 			"received", fmt.Sprintf("%#v", inBuf[hdrLen:len(b)]),
 			"expected", fmt.Sprintf("%#v", b))
