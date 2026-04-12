@@ -81,10 +81,25 @@ func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*De
 		toClean:  make(map[string]bool),
 	}
 	if err := d.preEnableTcmu(); err != nil {
-		return d, err
+		_ = d.teardown()
+		return nil, err
 	}
 	if err := d.start(ctx); err != nil {
-		return d, err
+		if d.ctxCancel != nil {
+			d.ctxCancel()
+			d.wg.Wait()
+		}
+		if d.cancelFd >= 0 {
+			unix.Close(d.cancelFd)
+		}
+		if d.epollFd >= 0 {
+			unix.Close(d.epollFd)
+		}
+		if d.uioFd >= 0 {
+			unix.Close(d.uioFd)
+		}
+		_ = d.teardown()
+		return nil, err
 	}
 	return d, d.postEnableTcmu()
 }
