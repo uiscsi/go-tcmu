@@ -156,6 +156,10 @@ func (d *Device) entIovecN(off int, idx int) []byte {
 		base = int(binary.LittleEndian.Uint32(d.mmap[baseOff:]))
 		length = int(binary.LittleEndian.Uint32(d.mmap[lenOff:]))
 	}
+	mmapLen := len(d.mmap)
+	if base < 0 || length < 0 || base > mmapLen || base+length > mmapLen {
+		panic(fmt.Sprintf("tcmu: iovec[%d] out of mmap bounds: base=%d length=%d mapsize=%d", idx, base, length, mmapLen))
+	}
 	return d.mmap[base : base+length]
 }
 
