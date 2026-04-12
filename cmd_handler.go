@@ -112,7 +112,9 @@ func EmulateEvpdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 		data[4] = 0x00
 		data[5] = 0x83
 
-		cmd.Write(data)
+		if _, err := cmd.Write(data); err != nil {
+			return cmd.MediumError(), nil
+		}
 		return cmd.Ok(), nil
 	case 0x83: // Device identification
 		used := 4
@@ -177,7 +179,9 @@ func EmulateEvpdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 		order := binary.BigEndian
 		order.PutUint16(data[2:4], uint16(used-4))
 
-		cmd.Write(data[:used])
+		if _, err := cmd.Write(data[:used]); err != nil {
+			return cmd.MediumError(), nil
+		}
 		return cmd.Ok(), nil
 	default:
 		return cmd.IllegalRequest(), nil
