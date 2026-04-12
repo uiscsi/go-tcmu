@@ -154,6 +154,17 @@ const (
 	 * Service action opcodes
 	 */
 	ReadCapacity16 = 0x10
+
+	// SSC-3 opcode aliases and additions
+	Rewind               = RezeroUnit // 0x01 -- same opcode as RezeroUnit per SPC-4/SSC-3
+	ReportDensitySupport = 0x44       // SSC-3: same byte as ReadHeader -- opcode is device-type specific per SPC-4
+)
+
+// SPC-4 Peripheral Device Types (INQUIRY byte 0)
+const (
+	DeviceTypeDisk    = 0x00 // Direct access block device (SBC)
+	DeviceTypeTape    = 0x01 // Sequential access device (SSC)
+	DeviceTypeOptical = 0x05 // CD/DVD device (MMC)
 )
 
 /*
@@ -203,4 +214,12 @@ const (
 	SenseAbortedCommand = 0x0b
 	SenseVolumeOverflow = 0x0d
 	SenseMiscompare     = 0x0e
+)
+
+// SSC-3 tape-specific Additional Sense Codes (ASC/ASCQ packed as uint16)
+const (
+	AscFilemark             = 0x0001 // Filemark detected (ASC=0x00, ASCQ=0x01)
+	AscEarlyWarningEOM      = 0x0002 // End-of-medium -- early warning (ASC=0x00, ASCQ=0x02)
+	AscBeginningOfPartition = 0x0004 // Beginning-of-partition/medium detected (ASC=0x00, ASCQ=0x04)
+	AscEndOfData            = 0x0005 // End-of-data detected (ASC=0x00, ASCQ=0x05)
 )
