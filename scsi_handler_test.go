@@ -233,6 +233,29 @@ func TestInquiryDeviceType(t *testing.T) {
 	}
 }
 
+func TestBackstorePath(t *testing.T) {
+	d := &Device{
+		hbaDir: "/sys/kernel/config/target/core/user_42",
+		scsi:   &SCSIHandler{VolumeName: "testvol"},
+	}
+	got := d.BackstorePath()
+	want := "/sys/kernel/config/target/core/user_42/testvol"
+	if got != want {
+		t.Fatalf("BackstorePath() = %q, want %q", got, want)
+	}
+}
+
+func TestExternalFabricField(t *testing.T) {
+	h := &SCSIHandler{}
+	if h.ExternalFabric {
+		t.Fatal("ExternalFabric should default to false")
+	}
+	h.ExternalFabric = true
+	if !h.ExternalFabric {
+		t.Fatal("ExternalFabric should be settable to true")
+	}
+}
+
 func TestPollCancelShutdown(t *testing.T) {
 	// Create a pipe to simulate the UIO fd.
 	r, w, err := os.Pipe()
