@@ -272,7 +272,9 @@ func EmulateModeSense(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 	if outlen < len(data) {
 		data = data[:outlen]
 	}
-	cmd.Write(data)
+	if _, err := cmd.Write(data); err != nil {
+		return SCSIResponse{}, err
+	}
 	return cmd.Ok(), nil
 }
 
