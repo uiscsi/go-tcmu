@@ -207,29 +207,29 @@ func (d *Device) createDevEntry() error {
 
 	found := false
 	matches := []string{}
-	path := fmt.Sprintf("/sys/bus/scsi/devices/%s*/block/*/dev", strings.TrimSpace(string(address)))
+	globPattern := fmt.Sprintf("/sys/bus/scsi/devices/%s*/block/*/dev", strings.TrimSpace(string(address)))
 	for i := 0; i < 30; i++ {
 		var err error
-		matches, err = filepath.Glob(path)
+		matches, err = filepath.Glob(globPattern)
 		if len(matches) > 0 && err == nil {
 			found = true
 			break
 		}
 
-		d.logger().Debug("tcmu: waiting for device", "path", path)
+		d.logger().Debug("tcmu: waiting for device", "path", globPattern)
 		time.Sleep(1 * time.Second)
 	}
 
 	if !found {
-		return fmt.Errorf("Failed to find %s", path)
+		return fmt.Errorf("Failed to find %s", globPattern)
 	}
 
 	if len(matches) == 0 {
-		return fmt.Errorf("Failed to find %s", path)
+		return fmt.Errorf("Failed to find %s", globPattern)
 	}
 
 	if len(matches) > 1 {
-		return fmt.Errorf("Too many matches for %s, found %d", path, len(matches))
+		return fmt.Errorf("Too many matches for %s, found %d", globPattern, len(matches))
 	}
 
 	majorMinor, err := os.ReadFile(matches[0])
