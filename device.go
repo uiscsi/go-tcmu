@@ -389,9 +389,12 @@ func (d *Device) openDevice(user string, vol string, uio string) error {
 		return err
 	}
 	d.mmap, err = syscall.Mmap(d.uioFd, 0, int(d.mapsize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		return fmt.Errorf("tcmu: mmap: %w", err)
+	}
 	d.cmdTail = d.mbCmdTail()
 	d.debugPrintMb()
-	return err
+	return nil
 }
 
 func (d *Device) debugPrintMb() {
