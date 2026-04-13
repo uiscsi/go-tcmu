@@ -1,84 +1,153 @@
 # go-tcmu
-[![GoDoc](https://godoc.org/github.com/coreos/go-tcmu?status.svg)](https://godoc.org/github.com/coreos/go-tcmu)
----
 
-Go bindings to attach Go `Reader`s and `Writer`s to the Linux kernel via SCSI.
+Go bindings for the Linux [TCM Userspace (TCMU)](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt) kernel API. Create virtual SCSI devices backed by Go handlers.
 
-It connects to the [TCM Userspace](https://www.kernel.org/doc/Documentation/target/tcmu-design.txt) kernel API, and provides a loopback device that responds to SCSI commands. This project is based on [open-iscsi/tcmu-runner](https://github.com/open-iscsi/tcmu-runner), but in pure Go.
+Forked from [coreos/go-tcmu](https://github.com/coreos/go-tcmu) and modernized for Go 1.25 with slog logging, context-based lifecycle, safe struct access, and tape device support.
 
-### Overview
+Maintained by the [uiscsi](https://github.com/uiscsi) project.
 
-This package creates two types of Handlers (much like `net/http`) for [SCSI block device](https://en.wikipedia.org/wiki/SCSI_command) commands. It wraps the implementation details of the kernel API, and sets up (a) a TCMU SCSI device and connect that to (b) a loopback SCSI target. 
+## Requirements
 
-From here, the [Linux IO Target](http://linux-iscsi.org/wiki/Main_Page) kernel stack can expose the SCSI target however it likes. This includes iSCSI, vHost, etc. For further details, see the [LIO wiki](http://linux-iscsi.org/wiki/Main_Page).
+- Go 1.25 or later
+- Linux kernel with `target_core_user` module
+- configfs mounted at `/sys/kernel/config`
+- Root privileges for device creation
 
-### Usage
-First, to use this package, you'll need the appropriate kernel modules and configfs mounted
+## Quick Start
 
-#### Make sure configfs is mounted 
+```go
+package main
 
-This may already be true on your system, depending on kernel configuration. Many distributions do this by default. Check if it's mounted to `/sys/kernel/config` with
+import (
+    "context"
+    "log"
 
+    tcmu "github.com/uiscsi/go-tcmu"
+)
+
+func main() {
+    rw := /* your io.ReaderAt + io.WriterAt */
+
+    handler := &tcmu.SCSIHandler{
+        HBA:        30,
+        LUN:        0,
+        WWN:        tcmu.NaaWWN{OUI: "000000", VendorID: tcmu.GenerateSerial("myvol")},
+        VolumeName: "myvol",
+        DataSizes:  tcmu.DataSizes{VolumeSize: 5 * 1024 * 1024 * 1024, BlockSize: 512},
+        DevReady:   tcmu.MultiThreadedDevReady(tcmu.ReadWriterAtCmdHandler{RW: rw}, 4),
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    d, err := tcmu.OpenTCMUDevice(ctx, "/dev/myvol", handler)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer d.Close()
+
+    // Device is now available at /dev/myvol/myvol
+    select {}
+}
 ```
+
+## Device Type Support
+
+The `InquiryInfo.DeviceType` field controls the SCSI peripheral device type reported in INQUIRY responses:
+
+```go
+handler := &tcmu.SCSIHandler{
+    // ...
+    DevReady: tcmu.SingleThreadedDevReady(tapeHandler),
+}
+// Set DeviceType on the InquiryInfo:
+// 0x00 = block device (default, backward compatible)
+// 0x01 = sequential-access (tape)
+```
+
+## External Fabric Support
+
+When `ExternalFabric` is true, `OpenTCMUDevice` creates only the TCMU configfs backstore and UIO file descriptor -- it skips loopback fabric setup and `/dev` node creation. Use `Device.BackstorePath()` to get the configfs path for linking into an external fabric (e.g., LIO iSCSI target).
+
+```go
+handler := &tcmu.SCSIHandler{
+    // ...
+    ExternalFabric: true,
+}
+
+d, err := tcmu.OpenTCMUDevice(ctx, "/dev/unused", handler)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Link the backstore into a LIO iSCSI target:
+backstorePath := d.BackstorePath()
+// backstorePath is e.g. "/sys/kernel/config/target/core/user_30/myvol"
+```
+
+## Kernel Setup
+
+### configfs
+
+Most distributions mount configfs automatically. Verify:
+
+```sh
 mount | grep configfs
+# configfs on /sys/kernel/config type configfs (rw,relatime)
 ```
 
-Which should respond
-```
-configfs on /sys/kernel/config type configfs (rw,relatime)
-```
+If not mounted:
 
-To mount it explicitly:
-```
+```sh
 sudo modprobe configfs
 sudo mkdir -p /sys/kernel/config
 sudo mount -t configfs none /sys/kernel/config
 ```
 
-#### Use the TCMU module
+### TCMU Module
 
-Many distros include the module, but few activate it by default.
-
-```
+```sh
 sudo modprobe target_core_user
 ```
 
+## TCMU Kernel Pitfalls
 
-Now that that's settled, there's [tcmufile.go](cmd/tcmufile/tcmufile.go) for a quick example binary that serves an image file under /dev/tcmufile/myfile. 
+Hard-won lessons from implementing and testing TCMU handlers. These are kernel-level behaviors not obvious from the TCMU design document.
 
-For creating your custom SCSI targets based on a ReadWriterAt:
+### hw_block_size Must Be >= 512 for Tape
 
-```go
-handler := &tcmu.SCSIHandler{
-        HBA: 30, // Choose a virtual HBA number. 30 is fine.
-        LUN: 0,  // The LUN attached to this HBA. Multiple LUNs can work on the same HBA, this differentiates them.
-        WWN: tcmu.NaaWWN{
-                OUI:      "000000",                      // Or provide your OUI
-                VendorID: tcmu.GenerateSerial("foobar"), // Or provide a vendor id/serial number
-                // Optional: Provide further information for your WWN
-                // VendorIDExt: "0123456789abcdef", 
-        },
-        VolumeName: "myVolName", // The name of your volume.
-        DataSizes: tcmu.DataSizes{
-                VolumeSize: 5 * 1024 * 1024, // Size in bytes, eg, 5GiB
-                BlockSize:  1024,            // Size of logical blocks, eg, 1K
-        },
-        DevReady: tcmu.SingleThreadedDevReady(
-                tcmu.ReadWriterAtCmdHandler{      // Or replace with your own handler
-                        RW: rw,
-                }),
-}
-d, _ := tcmu.OpenTCMUDevice("/dev/myDevDirectory", handler)
-defer d.Close()
-```
-This will create a device named `/dev/myDevDirectory/myVolName` with the mentioned details. It is now ready for formatting and treating like a block device.
+The kernel's configfs attribute `hw_block_size` rejects values below 512 with `EINVAL`. For tape devices that use variable-block mode (logical block size = 1), set `hw_block_size = 512` (the kernel's minimum) and handle variable-block semantics in the SCSI handler. The `BlockSize` in `DataSizes` controls `hw_block_size` in configfs.
 
-If you wish to handle more SCSI commands, you can implement a replacement for the `ReadWriterAtCmdHandler` following the interface:
+### Full-Allocation Transfer Padding
+
+The kernel always allocates `ExpectedDataTransferLen` bytes in the data-in/data-out buffers, even when the actual transfer is shorter. TCMU handlers MUST write exactly the amount of data indicated by the SCSI response, not the full buffer. The kernel copies only the handler's written bytes back to the initiator.
+
+For READ commands that return less data than requested (e.g., variable-block tape reads), write only the actual bytes via `cmd.Write(data[:actualLen])`. The remaining buffer space is ignored.
+
+### ILI Sense Forwarded Verbatim
+
+Sense data returned via `cmd.RespondSenseData()` is forwarded verbatim to the SCSI initiator. The kernel does not interpret or modify the sense buffer. This means:
+
+- The INFORMATION field (bytes 3-6 in fixed-format sense) carries the residue count as-is
+- FM (filemark), EOM (end-of-medium), and ILI (incorrect length indicator) flags in byte 2 are preserved
+- The handler is responsible for correct sense encoding per SPC-4 Table 27
+
+## Custom Handlers
+
+Implement `SCSICmdHandler` for full control over SCSI command processing:
 
 ```go
 type SCSICmdHandler interface {
-	HandleCommand(cmd *SCSICmd) (SCSIResponse, error)
+    HandleCommand(cmd *SCSICmd) (SCSIResponse, error)
 }
 ```
 
-If the default functionality was acceptable, the library contains a number of helpful `Emulate` functions that you can call to achieve the basic functionality.
+Use `SingleThreadedDevReady` for sequential-access devices (tape) or `MultiThreadedDevReady` for random-access devices (block).
+
+## History
+
+Originally created by the [CoreOS](https://github.com/coreos) team. Forked to `github.com/uiscsi/go-tcmu` for continued development with Go 1.25 modernization, context-based lifecycle management, safe struct access (no unsafe.Pointer), structured logging (log/slog), tape device support (DeviceType, ExternalFabric), and test helpers (NewTestSCSICmd).
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE).
