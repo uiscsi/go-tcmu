@@ -168,7 +168,7 @@ func TestDevReady(t *testing.T) {
 		}
 		cmdChan := make(chan *SCSICmd, 3)
 		respChan := make(chan SCSIResponse, 3)
-		f(cmdChan, respChan)
+		_ = f(cmdChan, respChan)
 		cmd := &SCSICmd{id: tt.id}
 		cmdChan <- cmd
 		resp := <-respChan
@@ -262,8 +262,8 @@ func TestPollCancelShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
-	defer w.Close()
+	defer func() { _ = r.Close() }()
+	defer func() { _ = w.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

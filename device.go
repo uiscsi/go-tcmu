@@ -99,13 +99,13 @@ func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*De
 			d.wg.Wait()
 		}
 		if d.cancelFd >= 0 {
-			unix.Close(d.cancelFd)
+			_ = unix.Close(d.cancelFd)
 		}
 		if d.epollFd >= 0 {
-			unix.Close(d.epollFd)
+			_ = unix.Close(d.epollFd)
 		}
 		if d.uioFd >= 0 {
-			unix.Close(d.uioFd)
+			_ = unix.Close(d.uioFd)
 		}
 		_ = d.teardown()
 		return nil, err
@@ -250,15 +250,15 @@ func (d *Device) createDevEntry() error {
 	}
 
 	if !found {
-		return fmt.Errorf("Failed to find %s", globPattern)
+		return fmt.Errorf("failed to find %s", globPattern)
 	}
 
 	if len(matches) == 0 {
-		return fmt.Errorf("Failed to find %s", globPattern)
+		return fmt.Errorf("failed to find %s", globPattern)
 	}
 
 	if len(matches) > 1 {
-		return fmt.Errorf("Too many matches for %s, found %d", globPattern, len(matches))
+		return fmt.Errorf("too many matches for %s, found %d", globPattern, len(matches))
 	}
 
 	majorMinor, err := os.ReadFile(matches[0])
@@ -475,7 +475,7 @@ func (d *Device) teardown() error {
 	}
 
 	for _, p := range pathsToRemove {
-		if k, _ := d.toClean[p]; k {
+		if d.toClean[p] {
 			err := remove(p)
 			if err != nil {
 				d.logger().Error("tcmu: remove failed", "err", err)
