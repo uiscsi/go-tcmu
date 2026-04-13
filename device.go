@@ -117,13 +117,13 @@ func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*De
 				d.wg.Wait()
 			}
 			if d.cancelFd >= 0 {
-				unix.Close(d.cancelFd)
+				_ = unix.Close(d.cancelFd)
 			}
 			if d.epollFd >= 0 {
-				unix.Close(d.epollFd)
+				_ = unix.Close(d.epollFd)
 			}
 			if d.uioFd >= 0 {
-				unix.Close(d.uioFd)
+				_ = unix.Close(d.uioFd)
 			}
 			_ = d.teardown()
 			return nil, err
@@ -223,7 +223,7 @@ func (d *Device) createDevEntry() error {
 	dev := filepath.Join(d.devPath, d.scsi.VolumeName)
 
 	if _, err := os.Stat(dev); err == nil {
-		return fmt.Errorf("Device %s already exists, can not create", dev)
+		return fmt.Errorf("device %s already exists, can not create", dev)
 	}
 	d.toClean[dev] = true
 
@@ -268,7 +268,7 @@ func (d *Device) createDevEntry() error {
 
 	parts := strings.Split(strings.TrimSpace(string(majorMinor)), ":")
 	if len(parts) != 2 {
-		return fmt.Errorf("Invalid major:minor string %s", string(majorMinor))
+		return fmt.Errorf("invalid major:minor string %s", string(majorMinor))
 	}
 
 	major, err := strconv.Atoi(parts[0])
@@ -485,7 +485,7 @@ func (d *Device) teardown() error {
 
 	// Should be cleaned up automatically, but if it isn't remove it
 	if _, err := os.Stat(dev); err == nil {
-		if k, _ := d.toClean[dev]; k {
+		if d.toClean[dev] {
 			err := remove(dev)
 			if err != nil {
 				return err
@@ -514,6 +514,6 @@ func remove(path string) error {
 	case err := <-done:
 		return err
 	case <-time.After(30 * time.Second):
-		return fmt.Errorf("Timeout trying to delete %s.", path)
+		return fmt.Errorf("timeout trying to delete %s", path)
 	}
 }

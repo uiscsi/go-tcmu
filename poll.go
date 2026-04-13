@@ -115,23 +115,10 @@ func (d *Device) getNextCommand() (*SCSICmd, error) {
 	return nil, nil
 }
 
-func (d *Device) printEnt(off int) {
-	for i, x := range d.mmap[off : off+d.entHdrGetLen(off)] {
-		fmt.Printf("0x%02x ", x)
-		if i%16 == 15 {
-			fmt.Printf("\n")
-		}
-	}
-}
-
 func (d *Device) nextEntryOff() int {
 	return int(d.cmdTail + d.mbCmdrOffset())
 }
 
 func (d *Device) headEntryOff() int {
 	return int(d.mbCmdHead() + d.mbCmdrOffset())
-}
-
-func (d *Device) tailEntryOff() int {
-	return int(d.mbCmdTail() + d.mbCmdrOffset())
 }

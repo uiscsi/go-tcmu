@@ -74,21 +74,6 @@ func (d *Device) entCmdId(off int) uint16 {
 	return binary.LittleEndian.Uint16(d.mmap[off+offCmdId:])
 }
 
-func (d *Device) setEntCmdId(off int, id uint16) {
-	binary.LittleEndian.PutUint16(d.mmap[off+offCmdId:], id)
-}
-
-func (d *Device) entKflags(off int) uint8 {
-	return d.mmap[off+offKFlags]
-}
-
-func (d *Device) entUflags(off int) uint8 {
-	return d.mmap[off+offUFlags]
-}
-
-func (d *Device) setEntUflagUnknownOp(off int) {
-	d.mmap[off+offUFlags] = 0x01
-}
 
 /*
 #define TCMU_SENSE_BUFFERSIZE 96
@@ -123,13 +108,6 @@ func (d *Device) entReqIovCnt(off int) uint32 {
 	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovCnt:])
 }
 
-func (d *Device) entReqIovBidiCnt(off int) uint32 {
-	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovBidiCnt:])
-}
-
-func (d *Device) entReqIovDifCnt(off int) uint32 {
-	return binary.LittleEndian.Uint32(d.mmap[off+offReqIovDifCnt:])
-}
 
 func (d *Device) entReqCdbOff(off int) uint64 {
 	return binary.LittleEndian.Uint64(d.mmap[off+offReqCdbOff:])

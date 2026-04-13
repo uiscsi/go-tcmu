@@ -7,20 +7,15 @@ package tcmu
 // Go should handle the endianness.
 
 const (
-	offLenOp         = 0
-	offCmdId         = 4
-	offKFlags        = 6
-	offUFlags        = 7
-	entReqRespOff    = 8
-	offReqIovCnt     = entReqRespOff + 0
-	offReqIovBidiCnt = entReqRespOff + 4
-	offReqIovDifCnt  = entReqRespOff + 8
-	offReqCdbOff     = entReqRespOff + 12
+	offLenOp      = 0
+	offCmdId      = 4
+	entReqRespOff = 8
+	offReqIovCnt  = entReqRespOff + 0
+	offReqCdbOff  = entReqRespOff + 12
 
 	iovSize        = 8
 	iovPtrWidth    = 4
 	offReqIov0Base = entReqRespOff + 36
-	offReqIov0Len  = entReqRespOff + 40
 
 	offRespSCSIStatus = entReqRespOff + 0
 	offRespSense      = entReqRespOff + 8
