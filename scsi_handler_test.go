@@ -278,13 +278,13 @@ func TestPollCancelShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(d.epollFd)
+	defer func() { _ = unix.Close(d.epollFd) }()
 
 	d.cancelFd, err = unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unix.Close(d.cancelFd)
+	defer func() { _ = unix.Close(d.cancelFd) }()
 
 	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.uioFd,
 		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.uioFd)}); err != nil {
