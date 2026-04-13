@@ -145,15 +145,15 @@ func (d *Device) Close() error {
 
 	// Clean up file descriptors.
 	if d.cancelFd >= 0 {
-		unix.Close(d.cancelFd)
+		_ = unix.Close(d.cancelFd)
 		d.cancelFd = -1
 	}
 	if d.epollFd >= 0 {
-		unix.Close(d.epollFd)
+		_ = unix.Close(d.epollFd)
 		d.epollFd = -1
 	}
 	if d.uioFd >= 0 {
-		unix.Close(d.uioFd)
+		_ = unix.Close(d.uioFd)
 		d.uioFd = -1
 	}
 
@@ -329,7 +329,7 @@ func (d *Device) start(ctx context.Context) error {
 
 	d.cancelFd, err = unix.Eventfd(0, unix.EFD_CLOEXEC|unix.EFD_NONBLOCK)
 	if err != nil {
-		unix.Close(d.epollFd)
+		_ = unix.Close(d.epollFd)
 		d.epollFd = -1
 		return fmt.Errorf("tcmu: eventfd: %w", err)
 	}
@@ -337,9 +337,9 @@ func (d *Device) start(ctx context.Context) error {
 	// Register UIO fd for read events.
 	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.uioFd,
 		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.uioFd)}); err != nil {
-		unix.Close(d.cancelFd)
+		_ = unix.Close(d.cancelFd)
 		d.cancelFd = -1
-		unix.Close(d.epollFd)
+		_ = unix.Close(d.epollFd)
 		d.epollFd = -1
 		return fmt.Errorf("tcmu: epoll_ctl uioFd: %w", err)
 	}
@@ -347,9 +347,9 @@ func (d *Device) start(ctx context.Context) error {
 	// Register cancel fd for read events.
 	if err := unix.EpollCtl(d.epollFd, unix.EPOLL_CTL_ADD, d.cancelFd,
 		&unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(d.cancelFd)}); err != nil {
-		unix.Close(d.cancelFd)
+		_ = unix.Close(d.cancelFd)
 		d.cancelFd = -1
-		unix.Close(d.epollFd)
+		_ = unix.Close(d.epollFd)
 		d.epollFd = -1
 		return fmt.Errorf("tcmu: epoll_ctl cancelFd: %w", err)
 	}

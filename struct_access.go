@@ -45,7 +45,7 @@ type tcmuOpcode int
 
 const (
 	tcmuOpPad tcmuOpcode = 0
-	tcmuOpCmd            = 1
+	tcmuOpCmd tcmuOpcode = 1
 )
 
 /*
