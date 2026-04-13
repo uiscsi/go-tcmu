@@ -1,3 +1,4 @@
+// Package scsi defines SCSI constants for opcodes, sense keys, ASC codes, device types, and SAM status values.
 package scsi
 
 /*

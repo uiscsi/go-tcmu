@@ -16,6 +16,9 @@ type SCSICmdHandler interface {
 	HandleCommand(cmd *SCSICmd) (SCSIResponse, error)
 }
 
+// ReadWriterAtCmdHandler implements SCSICmdHandler for a ReadWriterAt-backed
+// block device. It handles READ, WRITE, INQUIRY, TEST UNIT READY, MODE SENSE,
+// MODE SELECT, READ CAPACITY, and SERVICE ACTION IN commands.
 type ReadWriterAtCmdHandler struct {
 	RW  ReadWriterAt
 	Inq *InquiryInfo
@@ -60,6 +63,7 @@ func (h ReadWriterAtCmdHandler) HandleCommand(cmd *SCSICmd) (SCSIResponse, error
 	return cmd.NotHandled(), nil
 }
 
+// EmulateInquiry dispatches between standard and EVPD INQUIRY based on CDB byte 1.
 func EmulateInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	if (cmd.GetCDB(1) & 0x01) == 0 {
 		if cmd.GetCDB(2) == 0x00 {
@@ -70,6 +74,7 @@ func EmulateInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	return EmulateEvpdInquiry(cmd, inq)
 }
 
+// FixedString pads or truncates s to exactly length bytes, space-padded.
 func FixedString(s string, length int) []byte {
 	p := []byte(s)
 	l := len(p)
@@ -80,6 +85,7 @@ func FixedString(s string, length int) []byte {
 	return append(p, sp...)
 }
 
+// EmulateStdInquiry writes a standard INQUIRY response (EVPD=0) with the given vendor information.
 func EmulateStdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	buf := make([]byte, 36)
 	buf[0] = inq.DeviceType // peripheral device type (SPC-4 table 83)
@@ -101,6 +107,7 @@ func EmulateStdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	return cmd.Ok(), nil
 }
 
+// EmulateEvpdInquiry handles EVPD INQUIRY (vital product data) pages 0x00, 0x80, and 0x83.
 func EmulateEvpdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	vpdType := cmd.GetCDB(2)
 	slog.Debug("tcmu: EVPD inquiry", "page", fmt.Sprintf("0x%02x", vpdType))
@@ -190,10 +197,12 @@ func EmulateEvpdInquiry(cmd *SCSICmd, inq *InquiryInfo) (SCSIResponse, error) {
 	}
 }
 
+// EmulateTestUnitReady returns SAM_STAT_GOOD for TEST UNIT READY.
 func EmulateTestUnitReady(cmd *SCSICmd) (SCSIResponse, error) {
 	return cmd.Ok(), nil
 }
 
+// EmulateServiceActionIn dispatches SERVICE ACTION IN commands; currently handles READ CAPACITY(16).
 func EmulateServiceActionIn(cmd *SCSICmd) (SCSIResponse, error) {
 	if cmd.GetCDB(1) == scsi.ReadCapacity16 {
 		return EmulateReadCapacity16(cmd)
@@ -201,6 +210,7 @@ func EmulateServiceActionIn(cmd *SCSICmd) (SCSIResponse, error) {
 	return cmd.NotHandled(), nil
 }
 
+// EmulateReadCapacity16 returns a 32-byte READ CAPACITY(16) response with volume size and block size from the device.
 func EmulateReadCapacity16(cmd *SCSICmd) (SCSIResponse, error) {
 	buf := make([]byte, 32)
 	order := binary.BigEndian
@@ -228,6 +238,7 @@ func charToHex(c byte) (byte, bool) {
 	return 0x00, false
 }
 
+// CachingModePage writes the caching mode page (0x08) to w. WCE (Write Cache Enable) is set if wce is true.
 func CachingModePage(w io.Writer, wce bool) error {
 	buf := make([]byte, 20)
 	buf[0] = 0x08 // caching mode page
@@ -337,6 +348,7 @@ func EmulateModeSelect(cmd *SCSICmd, wce bool) (SCSIResponse, error) {
 	return cmd.Ok(), nil
 }
 
+// EmulateRead reads blocks from r at the command's LBA offset and writes them to the SCSI data buffer.
 func EmulateRead(cmd *SCSICmd, r io.ReaderAt) (SCSIResponse, error) {
 	offset := cmd.LBA() * uint64(cmd.Device().Sizes().BlockSize)
 	length := int(cmd.XferLen() * uint32(cmd.Device().Sizes().BlockSize))
@@ -368,6 +380,7 @@ func EmulateRead(cmd *SCSICmd, r io.ReaderAt) (SCSIResponse, error) {
 	return cmd.Ok(), nil
 }
 
+// EmulateWrite reads data from the SCSI command buffer and writes it to w at the LBA offset.
 func EmulateWrite(cmd *SCSICmd, r io.WriterAt) (SCSIResponse, error) {
 	offset := cmd.LBA() * uint64(cmd.Device().Sizes().BlockSize)
 	length := int(cmd.XferLen() * uint32(cmd.Device().Sizes().BlockSize))

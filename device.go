@@ -59,10 +59,12 @@ func (d *Device) logger() *slog.Logger {
 	return slog.Default()
 }
 
+// GetDevConfig returns the TCMU config string for this device.
 func (d *Device) GetDevConfig() string {
 	return fmt.Sprintf("go-tcmu//%s", d.scsi.VolumeName)
 }
 
+// Sizes returns the DataSizes (volume size and block size) configured for this device.
 func (d *Device) Sizes() DataSizes {
 	return d.scsi.DataSizes
 }
@@ -130,6 +132,7 @@ func OpenTCMUDevice(ctx context.Context, devPath string, scsi *SCSIHandler) (*De
 	return d, nil
 }
 
+// Close shuts down the TCMU device, stops the poll goroutines, and cleans up configfs entries.
 func (d *Device) Close() error {
 	// Cancel the context — this causes the watcher goroutine to write to eventfd
 	// and exit, which in turn causes beginPoll to exit via epoll.

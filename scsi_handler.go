@@ -281,8 +281,11 @@ type SCSIHandler struct {
 	ExternalFabric bool
 }
 
+// DevReadyFunc is called when the TCMU device is ready. It receives a command channel and a response
+// channel and should spawn goroutines to handle commands.
 type DevReadyFunc func(chan *SCSICmd, chan SCSIResponse) error
 
+// DataSizes holds the volume size and block size for a TCMU device.
 type DataSizes struct {
 	VolumeSize int64
 	BlockSize  int64
@@ -302,10 +305,12 @@ type NaaWWN struct {
 	VendorIDExt string
 }
 
+// DeviceID returns the NAA WWN device identifier string.
 func (n NaaWWN) DeviceID() string {
 	return n.genID("0")
 }
 
+// NexusID returns the NAA WWN nexus identifier string.
 func (n NaaWWN) NexusID() string {
 	return n.genID("1")
 }
@@ -332,12 +337,14 @@ func (n NaaWWN) assertCorrect() {
 	}
 }
 
+// GenerateSerial generates an 8-character hex serial from the MD5 hash of name.
 func GenerateSerial(name string) string {
 	digest := md5.New()
 	digest.Write([]byte(name))
 	return hex.EncodeToString(digest.Sum([]byte{}))[:8]
 }
 
+// GenerateTestWWN returns a WWN suitable for testing.
 func GenerateTestWWN() WWN {
 	return NaaWWN{
 		OUI:      "000000",
@@ -345,11 +352,14 @@ func GenerateTestWWN() WWN {
 	}
 }
 
+// ReadWriterAt combines io.ReaderAt and io.WriterAt.
 type ReadWriterAt interface {
 	io.ReaderAt
 	io.WriterAt
 }
 
+// BasicSCSIHandler creates a default SCSIHandler backed by rw for testing.
+// Uses loopback fabric with 1 GiB volume and 1 KiB blocks.
 func BasicSCSIHandler(rw ReadWriterAt) *SCSIHandler {
 	return &SCSIHandler{
 		HBA:        30,
@@ -365,6 +375,8 @@ func BasicSCSIHandler(rw ReadWriterAt) *SCSIHandler {
 	}
 }
 
+// SingleThreadedDevReady wraps an SCSICmdHandler in a DevReadyFunc that dispatches commands
+// sequentially on a single goroutine. Appropriate for sequential-access devices like tape drives.
 func SingleThreadedDevReady(h SCSICmdHandler) DevReadyFunc {
 	return func(in chan *SCSICmd, out chan SCSIResponse) error {
 		go func(h SCSICmdHandler, in chan *SCSICmd, out chan SCSIResponse) {
@@ -390,6 +402,8 @@ func SingleThreadedDevReady(h SCSICmdHandler) DevReadyFunc {
 	}
 }
 
+// MultiThreadedDevReady wraps an SCSICmdHandler in a DevReadyFunc that dispatches commands
+// across the given number of goroutines.
 func MultiThreadedDevReady(h SCSICmdHandler, threads int) DevReadyFunc {
 	return func(in chan *SCSICmd, out chan SCSIResponse) error {
 		go func(h SCSICmdHandler, in chan *SCSICmd, out chan SCSIResponse, threads int) {
